@@ -780,6 +780,7 @@
         <button class="btn danger" id="deleteBtn">Löschen</button>
         <button class="btn danger" id="resetBtn">Reset (Zellen leeren)</button>
 
+        <button class="btn secondary" id="importPresetBtn">Grid-Preset importieren</button>
         <button class="btn secondary" id="exportBtn">Export (meine Lösung)</button>
         <button class="btn secondary" id="importCommBtn">Import Community (additiv)</button>
         <button class="btn small" id="clearCommBtn">Community löschen</button>
@@ -1764,6 +1765,33 @@
     document.getElementById('resetBtn').addEventListener('click', () => {
       const ok = confirm('Wirklich alle Zellen leeren? (Titel bleiben)');
       if (ok) resetGrid();
+    });
+
+    document.getElementById('importPresetBtn').addEventListener('click', () => {
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = '.json';
+      fileInput.style.display = 'none';
+
+      fileInput.addEventListener('change', async () => {
+        try {
+          const file = fileInput.files[0];
+          if (!file) return;
+          const text = await file.text();
+          const preset = JSON.parse(text);
+          applyPreset(preset);
+          resetGrid();
+          saveGridState();
+          toast('Grid-Preset geladen.');
+        } catch(err) {
+          console.error(err);
+          toast('Fehler beim Laden des Presets.');
+        }
+        fileInput.remove();
+      });
+
+      document.body.appendChild(fileInput);
+      fileInput.click();
     });
 
     document.getElementById('exportBtn').addEventListener('click', exportMySolution);
