@@ -524,11 +524,8 @@
     <div class="panel">
       <h2>Controls</h2>
       <div class="stack">
-        <div class="muted" id="autoStatus">Status: nicht eingerichtet</div>
+        <div class="muted" id="autoStatus">Laden...</div>
         <div class="muted" id="commStatus">Community-Datensätze: 0</div>
-
-        <button class="btn secondary" id="setupBtn">Setup: Hauptordner wählen</button>
-        <button class="btn small" id="clearSetupBtn">Setup löschen</button>
 
         <div class="field">
           <input id="pokeInput" placeholder="Pokémon eingeben (Deutsch)…" autocomplete="off" />
@@ -542,9 +539,6 @@
         <button class="btn secondary" id="exportBtn">Export (meine Lösung)</button>
         <button class="btn secondary" id="importCommBtn">Import Community (additiv)</button>
         <button class="btn small" id="clearCommBtn">Community löschen</button>
-
-        <button class="btn secondary" id="bgPickBtn">Hintergrund wählen</button>
-        <button class="btn small" id="bgClearBtn">Hintergrund zurücksetzen</button>
 
         <button class="btn" id="presenterBtn">Presenter Mode (H)</button>
 
@@ -563,41 +557,26 @@
     // ========= CONFIG =========
     const MAX_HEADER_LINES = 3;
 
-    // Struktur im gewählten Hauptordner:
-    // dex_de.json
-    // grid_preset.json (optional)
-    // pokemon/1.png
-    // pokemon/shiny/1.png
-    // Pokemon Cries/1.ogg
-    // ShinySound.mp3 (oder ohne Endung)
-    // ShinySparkle.gif (oder ohne Endung)
-    const POKEMON_DIR_NAME = 'pokemon';
-    const SHINY_SUBDIR_NAME = 'shiny';
-    const MAPPING_FILE_NAME = 'dex_de.json';
-    const PRESET_FILE_NAME  = 'grid_preset.json';
+    // Asset paths (relative to site root)
+    const POKEMON_PATH = 'pokemon';
+    const SHINY_PATH   = 'pokemon/shiny';
+    const CRIES_PATH   = 'cries';
+    const DATA_PATH    = 'data';
+    const EFFECTS_PATH = 'assets/effects';
 
-    const CRIES_DIR_NAME = 'Pokemon Cries';
     const CRY_EXT = '.ogg';
-
-    // Shiny FX-Dateien liegen direkt im Root (dein pokegrid-Ordner)
-    const SHINY_SOUND_BASE = 'ShinySound';
-    const SHINY_SPARKLE_BASE = 'ShinySparkle';
 
     // Shiny (nur visuell, nicht exportiert)
     const SHINY_CHANCE = 0.05; // 5%
-    const SPARKLE_DURATION_MS = 1000; // dein GIF ~1s
+    const SPARKLE_DURATION_MS = 1000; // GIF ~1s
 
     // Lautstärke-Storage Keys
     const LS_CRY_VOL = 'pokegrid_cry_vol';
     const LS_SHINY_VOL = 'pokegrid_shiny_vol';
 
     // ========= State =========
-    let rootHandle = null;
-    let pokemonHandle = null;
-    let shinyHandle = null;
-    let criesHandle = null;
-
     let dex = [];
+    let appReady = false;
 
     let selectedCell = null;
     let deleteMode = false;
@@ -609,13 +588,12 @@
     const communityNames = new Map();  // key: "r,c,pokeKey" => Set(personName)
     let communityMaxCount = 0;
 
-    // Shiny assets
-    let shinyGifUrl = null;
-    let shinySoundUrl = null;
+    // Shiny assets (static URLs)
+    const shinyGifUrl = `${EFFECTS_PATH}/ShinySparkle.gif`;
+    const shinySoundUrl = `${EFFECTS_PATH}/ShinySound.mp3`;
     let shinyAudio = null;
 
-    // Cry cache / audio
-    const cryUrlCache = new Map(); // id -> objectURL
+    // Cry audio
     const cryAudio = new Audio();
 
     const toastEl = document.getElementById('toast');
@@ -666,50 +644,6 @@
 
     cryVolEl?.addEventListener('input', applyCryVolume);
     shinyVolEl?.addEventListener('input', applyShinyVolume);
-
-    // ========= IndexedDB (Ordner merken) =========
-    const DB_NAME = 'pokegrid_db';
-    const STORE = 'handles';
-    const KEY = 'rootDir';
-
-    function openDB(){
-      return new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, 1);
-        req.onupgradeneeded = () => {
-          const db = req.result;
-          if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-    }
-    async function idbSet(key, value){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put(value, key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    }
-    async function idbGet(key){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readonly');
-        const req = tx.objectStore(STORE).get(key);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      });
-    }
-    async function idbDel(key){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).delete(key);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    }
 
     // ========= Normalization =========
     function stripAccents(s){
@@ -894,146 +828,54 @@
       toast('Grid zurückgesetzt.');
     }
 
-    // ========= Setup / Loading =========
-    async function ensurePermissions(handle, write=false){
-      if (!handle) return false;
-      const opts = { mode: write ? 'readwrite' : 'read' };
-      let perm = await handle.queryPermission?.(opts);
-      if (perm === 'granted') return true;
-      perm = await handle.requestPermission?.(opts);
-      return perm === 'granted';
-    }
-
-    async function getDir(parent, name){
-      try{ return await parent.getDirectoryHandle(name); }
-      catch{ return null; }
-    }
-    async function getFile(parent, name){
-      try{ return await parent.getFileHandle(name); }
-      catch{ return null; }
-    }
-
-    async function fileUrlFromHandle(fileHandle){
-      const file = await fileHandle.getFile();
-      return URL.createObjectURL(file);
-    }
-
-    async function tryLoadRootFileUrl(baseName, exts){
-      for (const ext of exts){
-        const fname = baseName.toLowerCase().endsWith(ext) ? baseName : (baseName + ext);
-        try{
-          const fh = await rootHandle.getFileHandle(fname);
-          return await fileUrlFromHandle(fh);
-        }catch{}
-      }
-      return null;
-    }
-
-    async function loadOptionalRootAssets(){
-      shinyGifUrl = await tryLoadRootFileUrl(SHINY_SPARKLE_BASE, ['.gif', '.webp', '.png']);
-      shinySoundUrl = await tryLoadRootFileUrl(SHINY_SOUND_BASE, ['.mp3', '.wav', '.ogg']);
-
-      if (shinySoundUrl){
-        shinyAudio = new Audio(shinySoundUrl);
-        applyShinyVolume(); // nimmt Slider + speichert
-      }
-    }
-
-    async function loadMappingFromRoot(root){
-      const fh = await getFile(root, MAPPING_FILE_NAME);
-      if (!fh) throw new Error(`Fehlt: ${MAPPING_FILE_NAME}`);
-      const file = await fh.getFile();
-      const obj = JSON.parse(await file.text());
+    // ========= Loading (HTTP fetch) =========
+    async function loadMapping(){
+      const resp = await fetch(`${DATA_PATH}/dex_de.json`);
+      if (!resp.ok) throw new Error('Fehler beim Laden von dex_de.json');
+      const obj = await resp.json();
       dex = Array.isArray(obj.entries) ? obj.entries : [];
       if (!dex.length) throw new Error('Mapping leer/ungültig.');
     }
 
-    async function loadPresetFromRoot(root){
-      const fh = await getFile(root, PRESET_FILE_NAME);
-      if (!fh) return null; // optional
-      const file = await fh.getFile();
-      return JSON.parse(await file.text());
+    async function loadPreset(){
+      try {
+        const resp = await fetch(`${DATA_PATH}/grid_preset.json`);
+        if (!resp.ok) return null;
+        return await resp.json();
+      } catch { return null; }
     }
 
-    async function initFromRoot(root){
-      rootHandle = root;
-
-      const ok = await ensurePermissions(rootHandle, false);
-      if (!ok) throw new Error('Keine Berechtigung für den Ordner.');
-
-      pokemonHandle = await getDir(rootHandle, POKEMON_DIR_NAME);
-      if (!pokemonHandle) throw new Error(`Fehlt Ordner: ${POKEMON_DIR_NAME}/`);
-
-      shinyHandle = await getDir(pokemonHandle, SHINY_SUBDIR_NAME); // optional
-      criesHandle = await getDir(rootHandle, CRIES_DIR_NAME); // optional
-
-      await loadMappingFromRoot(rootHandle);
-
-      const preset = await loadPresetFromRoot(rootHandle);
-      if (preset) applyPreset(preset);
-
-      await loadOptionalRootAssets();
-
-      setStatus(`Eingerichtet ✅  (${dex.length} Einträge)`);
-      toast('Setup geladen. Tool ist bereit.');
+    function initShinyAssets(){
+      shinyAudio = new Audio(shinySoundUrl);
+      applyShinyVolume();
     }
 
-    async function setupPickRoot(){
-      try{
-        if (!window.showDirectoryPicker){
-          alert('Dein Browser unterstützt den Ordner-Picker nicht. Bitte Chrome/Edge nutzen.');
-          return;
-        }
-        const picked = await window.showDirectoryPicker();
-        await initFromRoot(picked);
-        await idbSet(KEY, picked);
-      }catch(err){
+    async function initApp(){
+      try {
+        setStatus('Laden...');
+
+        const [, preset] = await Promise.all([
+          loadMapping(),
+          loadPreset()
+        ]);
+
+        if (preset) applyPreset(preset);
+        initShinyAssets();
+
+        appReady = true;
+        setStatus(`Bereit (${dex.length} Einträge)`);
+        toast('Tool ist bereit.');
+      } catch(err) {
         console.error(err);
-        setStatus('Status: nicht eingerichtet');
-        toast('Setup fehlgeschlagen (Ordner/Struktur prüfen).');
+        setStatus('Fehler beim Laden der Daten.');
+        toast('Laden fehlgeschlagen. Seite neu laden.');
       }
-    }
-
-    async function tryAutoRestore(){
-      try{
-        const saved = await idbGet(KEY);
-        if (!saved){
-          setStatus('Status: nicht eingerichtet (bitte Setup wählen)');
-          return;
-        }
-        const ok = await ensurePermissions(saved, false);
-        if (!ok){
-          setStatus('Status: Bitte Setup erneut bestätigen');
-          return;
-        }
-        await initFromRoot(saved);
-      }catch(err){
-        console.error(err);
-        setStatus('Status: nicht eingerichtet (bitte Setup wählen)');
-      }
-    }
-
-    async function clearSetup(){
-      await idbDel(KEY);
-      rootHandle = null; pokemonHandle = null; shinyHandle = null; criesHandle = null; dex = [];
-      shinyGifUrl = null; shinySoundUrl = null; shinyAudio = null;
-      setStatus('Status: nicht eingerichtet (Setup gelöscht)');
-      toast('Setup gelöscht.');
     }
 
     // ========= Images / Shiny =========
-    async function loadImageUrlById(id, wantShiny){
-      if (!pokemonHandle) throw new Error('Nicht eingerichtet.');
-      const filename = `${id}.png`;
-
-      if (wantShiny && shinyHandle){
-        try{
-          const fh = await shinyHandle.getFileHandle(filename);
-          return await fileUrlFromHandle(fh);
-        }catch{}
-      }
-      const fh2 = await pokemonHandle.getFileHandle(filename);
-      return await fileUrlFromHandle(fh2);
+    function getImageUrl(id, wantShiny){
+      const folder = wantShiny ? SHINY_PATH : POKEMON_PATH;
+      return `${folder}/${id}.png`;
     }
 
     function playSparkleOnce(cell){
@@ -1083,24 +925,13 @@
       }
     }
 
-    async function getCryUrlById(id){
-      if (cryUrlCache.has(id)) return cryUrlCache.get(id);
-      if (!criesHandle) return null;
-
-      try{
-        const fh = await criesHandle.getFileHandle(`${id}${CRY_EXT}`);
-        const url = await fileUrlFromHandle(fh);
-        cryUrlCache.set(id, url);
-        return url;
-      }catch{
-        return null;
-      }
+    function getCryUrl(id){
+      return `${CRIES_PATH}/${id}${CRY_EXT}`;
     }
 
     async function playCry(id){
       try{
-        const url = await getCryUrlById(id);
-        if (!url) return;
+        const url = getCryUrl(id);
         cryAudio.pause();
         cryAudio.currentTime = 0;
         cryAudio.src = url;
@@ -1237,42 +1068,37 @@
     }
 
     // ========= Place Pokemon =========
-    async function placePokemon(entry){
+    function placePokemon(entry){
       if (!entry) return;
       if (!selectedCell) randomEmptyCell();
       if (!selectedCell) return;
 
-      try{
-        const wantShiny = Math.random() < SHINY_CHANCE;
-        const url = await loadImageUrlById(entry.id, wantShiny);
+      const wantShiny = Math.random() < SHINY_CHANCE;
+      const url = getImageUrl(entry.id, wantShiny);
 
-        selectedCell.dataset.pid = String(entry.id);
-        selectedCell.dataset.pokeKey = String(entry.key || normKey(entry.display || ''));
+      selectedCell.dataset.pid = String(entry.id);
+      selectedCell.dataset.pokeKey = String(entry.key || normKey(entry.display || ''));
 
-        selectedCell.innerHTML = '';
+      selectedCell.innerHTML = '';
 
-        const img = document.createElement('img');
-        img.alt = entry.display;
-        img.src = url;
-        selectedCell.appendChild(img);
+      const img = document.createElement('img');
+      img.alt = entry.display;
+      img.src = url;
+      selectedCell.appendChild(img);
 
-        // Community overlay + Score
-        updateCommunityOverlayForCell(selectedCell);
-        recalcCommunityScore();
+      // Community overlay + Score
+      updateCommunityOverlayForCell(selectedCell);
+      recalcCommunityScore();
 
-        // Audio: normal => Cry sofort
-        // Shiny => Sparkle + Sound, DANACH Cry
-        if (wantShiny){
-          playSparkleOnce(selectedCell);
-          playShinySoundAndThen(() => playCry(entry.id));
-          toast(`✨ SHINY! ${entry.display}`);
-        } else {
-          playCry(entry.id);
-          toast(`Gesetzt: ${entry.display}`);
-        }
-      }catch(err){
-        console.error(err);
-        toast('Bild nicht gefunden (Setup/Ordner prüfen).');
+      // Audio: normal => Cry sofort
+      // Shiny => Sparkle + Sound, DANACH Cry
+      if (wantShiny){
+        playSparkleOnce(selectedCell);
+        playShinySoundAndThen(() => playCry(entry.id));
+        toast(`Gesetzt: ${entry.display} (SHINY!)`);
+      } else {
+        playCry(entry.id);
+        toast(`Gesetzt: ${entry.display}`);
       }
     }
 
@@ -1355,32 +1181,7 @@
       if (!e.target.closest('.field')) hideDD();
     });
 
-    // ========= Background picker =========
-    let bgObjectUrl = null;
-
-    async function pickBackground(){
-      try{
-        const [fh] = await window.showOpenFilePicker({
-          types: [{ description:'Bilder', accept: { 'image/*': ['.png','.jpg','.jpeg','.webp','.gif'] } }],
-          multiple:false
-        });
-        const file = await fh.getFile();
-        if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
-        bgObjectUrl = URL.createObjectURL(file);
-
-        bgLayer.style.backgroundImage = `url("${bgObjectUrl}")`;
-        bgLayer.style.opacity = '0.55';
-        toast('Hintergrund gesetzt.');
-      }catch{}
-    }
-
-    function clearBackground(){
-      if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
-      bgObjectUrl = null;
-      bgLayer.style.backgroundImage = '';
-      bgLayer.style.opacity = '0';
-      toast('Hintergrund zurückgesetzt.');
-    }
+    // ========= (Background picker removed for hosted version) =========
 
     // ========= Export / Import Community =========
     function downloadJson(obj, filename){
@@ -1447,32 +1248,39 @@
       }
     }
 
-    async function importCommunityAdditive(){
-      try{
-        const handles = await window.showOpenFilePicker({
-          types: [{ description:'JSON', accept: { 'application/json':['.json'] } }],
-          multiple: true
-        });
+    function importCommunityAdditive(){
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = '.json';
+      fileInput.multiple = true;
+      fileInput.style.display = 'none';
 
-        let loaded = 0;
-        for (const fh of handles){
-          const file = await fh.getFile();
-          const text = await file.text();
-          const obj = JSON.parse(text);
+      fileInput.addEventListener('change', async () => {
+        try {
+          let loaded = 0;
+          for (const file of fileInput.files){
+            const text = await file.text();
+            const obj = JSON.parse(text);
 
-          const who = baseNameNoExt(file.name);
-          addCommunityDataset(obj, who);
+            const who = baseNameNoExt(file.name);
+            addCommunityDataset(obj, who);
 
-          loaded++;
+            loaded++;
+          }
+
+          communityDatasetCount += loaded;
+          setCommStatus();
+          refreshAllCommunityOverlays();
+          toast(`Community importiert: +${loaded} Datei(en).`);
+        } catch(err) {
+          console.error(err);
+          toast('Fehler beim Importieren.');
         }
+        fileInput.remove();
+      });
 
-        communityDatasetCount += loaded;
-        setCommStatus();
-        refreshAllCommunityOverlays();
-        toast(`Community importiert: +${loaded} Datei(en).`);
-      }catch(err){
-        if (err?.name !== 'AbortError') console.error(err);
-      }
+      document.body.appendChild(fileInput);
+      fileInput.click();
     }
 
     function clearCommunity(){
@@ -1486,9 +1294,6 @@
     }
 
     // ========= Controls =========
-    document.getElementById('setupBtn').addEventListener('click', setupPickRoot);
-    document.getElementById('clearSetupBtn').addEventListener('click', clearSetup);
-
     document.getElementById('randomBtn').addEventListener('click', () => randomEmptyCell());
 
     const deleteBtn = document.getElementById('deleteBtn');
@@ -1512,9 +1317,6 @@
       const ok = confirm('Community-Daten wirklich löschen?');
       if (ok) clearCommunity();
     });
-
-    document.getElementById('bgPickBtn').addEventListener('click', pickBackground);
-    document.getElementById('bgClearBtn').addEventListener('click', clearBackground);
 
     const presenterBtn = document.getElementById('presenterBtn');
     function togglePresenter(){
@@ -1540,7 +1342,7 @@
     requestAnimationFrame(() => headerSpans.forEach(sp => fitHeaderText(sp)));
     window.addEventListener('resize', () => headerSpans.forEach(sp => fitHeaderText(sp)));
 
-    tryAutoRestore();
+    initApp();
   </script>
 </body>
 </html>
