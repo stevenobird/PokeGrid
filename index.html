@@ -1754,18 +1754,12 @@
 
     function isMobile(){ return window.matchMedia('(max-width:800px)').matches; }
 
-    function openPanel(){
+    function openPanel(focusInput){
       panelEl.classList.add('open');
       panelBackdrop.classList.add('open');
-      // Focus input after the slide-up animation so the keyboard opens
-      setTimeout(() => {
-        input.focus({ preventScroll: true });
-        // iOS sometimes needs a second nudge
-        if (document.activeElement !== input){
-          input.click();
-          input.focus({ preventScroll: true });
-        }
-      }, 260);
+      // On iOS, focus() must happen synchronously within the user gesture
+      // call stack — any setTimeout breaks the chain and the OS blocks the keyboard.
+      if (focusInput) input.focus({ preventScroll: true });
     }
     function closePanel(){
       panelEl.classList.remove('open');
@@ -1774,7 +1768,7 @@
 
     menuFab.addEventListener('click', (e) => {
       e.stopPropagation();
-      openPanel();
+      openPanel(true);
     });
     panelClose.addEventListener('click', closePanel);
     panelBackdrop.addEventListener('click', closePanel);
@@ -1782,7 +1776,7 @@
     // Open panel when a cell is tapped on mobile
     cells.forEach(c => {
       c.addEventListener('click', () => {
-        if (isMobile() && !deleteMode) openPanel();
+        if (isMobile() && !deleteMode) openPanel(true);
       });
     });
 
