@@ -645,6 +645,78 @@
     cryVolEl?.addEventListener('input', applyCryVolume);
     shinyVolEl?.addEventListener('input', applyShinyVolume);
 
+    // ========= LocalStorage Grid Persistence =========
+    const LS_GRID_STATE = 'pokegrid_grid_state';
+
+    function saveGridState(){
+      try {
+        const cellData = cells.map(c => ({
+          pid: c.dataset.pid || '',
+          pokeKey: c.dataset.pokeKey || ''
+        }));
+
+        const colTexts = Array.from(document.querySelectorAll('.hdr .hdrText')).map(s => s.textContent);
+        const rowTexts = Array.from(document.querySelectorAll('.rowhdr .rowhdrText')).map(s => s.textContent);
+
+        const state = {
+          cells: cellData,
+          columns: colTexts,
+          rows: rowTexts,
+          timestamp: Date.now()
+        };
+        localStorage.setItem(LS_GRID_STATE, JSON.stringify(state));
+      } catch(e) { console.warn('Speichern fehlgeschlagen:', e); }
+    }
+
+    function restoreGridState(){
+      try {
+        const raw = localStorage.getItem(LS_GRID_STATE);
+        if (!raw) return false;
+
+        const state = JSON.parse(raw);
+        if (!state || !Array.isArray(state.cells)) return false;
+
+        let restored = 0;
+        for (let i = 0; i < Math.min(cells.length, state.cells.length); i++){
+          const { pid, pokeKey } = state.cells[i];
+          if (!pid || !pokeKey) continue;
+
+          cells[i].dataset.pid = pid;
+          cells[i].dataset.pokeKey = pokeKey;
+          cells[i].innerHTML = '';
+
+          const img = document.createElement('img');
+          img.alt = pokeKey;
+          img.src = getImageUrl(pid, false); // restore always uses normal sprite
+          cells[i].appendChild(img);
+          restored++;
+        }
+
+        // Restore header texts (only if not locked by preset)
+        if (Array.isArray(state.columns)){
+          const colSpans = Array.from(document.querySelectorAll('.hdr .hdrText'));
+          for (let i = 0; i < Math.min(colSpans.length, state.columns.length); i++){
+            colSpans[i].textContent = state.columns[i];
+          }
+        }
+        if (Array.isArray(state.rows)){
+          const rowSpans = Array.from(document.querySelectorAll('.rowhdr .rowhdrText'));
+          for (let i = 0; i < Math.min(rowSpans.length, state.rows.length); i++){
+            rowSpans[i].textContent = state.rows[i];
+          }
+        }
+
+        requestAnimationFrame(() => headerSpans.forEach(sp => fitHeaderText(sp)));
+        refreshAllCommunityOverlays();
+
+        if (restored > 0) toast(`${restored} Zelle(n) wiederhergestellt.`);
+        return restored > 0;
+      } catch(e) {
+        console.warn('Wiederherstellen fehlgeschlagen:', e);
+        return false;
+      }
+    }
+
     // ========= Normalization =========
     function stripAccents(s){
       return s.replace(/ß/g,'ss').normalize('NFKD').replace(/[\u0300-\u036f]/g,'');
@@ -742,6 +814,7 @@
       span.contentEditable = "false";
       span.textContent = (span.textContent || '').trim() || span.dataset.prev || '—';
       fitHeaderText(span);
+      saveGridState();
     }
     function cancelEditHeader(span){
       if (!span.isContentEditable) return;
@@ -779,6 +852,7 @@
       cell.innerHTML = '<div class="hint">leer</div>';
       updateCommunityOverlayForCell(cell);
       recalcCommunityScore();
+      saveGridState();
     }
 
     function isEmpty(cell){ return !cell.dataset.pid; }
@@ -825,6 +899,7 @@
       selectCell(cells[0]);
       randomEmptyCell();
       recalcCommunityScore();
+      saveGridState();
       toast('Grid zurückgesetzt.');
     }
 
@@ -861,6 +936,9 @@
 
         if (preset) applyPreset(preset);
         initShinyAssets();
+
+        // Restore saved grid state from localStorage
+        restoreGridState();
 
         appReady = true;
         setStatus(`Bereit (${dex.length} Einträge)`);
@@ -1089,6 +1167,7 @@
       // Community overlay + Score
       updateCommunityOverlayForCell(selectedCell);
       recalcCommunityScore();
+      saveGridState();
 
       // Audio: normal => Cry sofort
       // Shiny => Sparkle + Sound, DANACH Cry
