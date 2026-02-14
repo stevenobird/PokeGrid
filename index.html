@@ -1514,11 +1514,11 @@
         b.type = 'button';
         b.textContent = it.display;
         b.addEventListener('click', () => {
-          input.value = it.display;
           hideDD();
           placePokemon(it);
-          input.focus();
-          input.select();
+          input.value = '';
+          input.blur();
+          if (isMobile()) closePanel();
         });
         if (idx === 0) b.classList.add('active');
         dd.appendChild(b);
@@ -1552,7 +1552,12 @@
         if (e.key === 'Enter'){
           const q = normKey(input.value);
           const exact = dex.find(x => (x.key||'') === q) || null;
-          if (exact) placePokemon(exact);
+          if (exact){
+            placePokemon(exact);
+            input.value = '';
+            input.blur();
+            if (isMobile()) closePanel();
+          }
         }
         return;
       }
