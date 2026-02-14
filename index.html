@@ -191,6 +191,37 @@
       user-select:none;
       min-width:0;
       overflow:hidden;
+      position:relative;
+    }
+
+    /* Header tooltip */
+    #hdrTooltip{
+      position:fixed;
+      z-index:800;
+      max-width:220px;
+      padding:8px 12px;
+      border-radius:12px;
+      background: rgba(12,14,22,.94);
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow: 0 12px 32px rgba(0,0,0,.55);
+      backdrop-filter: blur(10px);
+      color: rgba(255,255,255,.92);
+      font-size:13px;
+      font-weight:700;
+      letter-spacing:.5px;
+      text-transform:uppercase;
+      line-height:1.3;
+      pointer-events:none;
+      opacity:0;
+      transition: opacity .15s ease;
+      word-break: break-word;
+    }
+    #hdrTooltip.visible{ opacity:1; }
+
+    /* Desktop: show on hover */
+    @media (hover:hover){
+      .hdr:hover #hdrTooltip,
+      .rowhdr:hover #hdrTooltip{ /* handled via JS positioning */ }
     }
 
     .hdrText, .rowhdrText{
@@ -567,6 +598,8 @@
         font-size: clamp(8px, 2.4vw, 14px);
         letter-spacing: .3px;
       }
+      .hdrText{ -webkit-line-clamp: 4; }
+      .rowhdrText{ -webkit-line-clamp: 10; }
 
       .cornerInfo{ padding: 4px 6px; border-radius: 10px; }
       .cornerTitle{ font-size: clamp(6px, 1.8vw, 10px); }
@@ -689,6 +722,7 @@
     <div class="loadSub loadDots">Daten werden geladen...</div>
   </div>
 
+  <div id="hdrTooltip"></div>
   <div id="bgLayer"></div>
 
   <div class="wrap">
@@ -760,8 +794,10 @@
 
   <script>
     // ========= CONFIG =========
-    const MAX_COL_HEADER_LINES = 3;
-    const MAX_ROW_HEADER_LINES = 6;
+    const MAX_COL_HEADER_LINES_DESKTOP = 3;
+    const MAX_ROW_HEADER_LINES_DESKTOP = 6;
+    const MAX_COL_HEADER_LINES_MOBILE = 4;
+    const MAX_ROW_HEADER_LINES_MOBILE = 10;
 
     // Asset paths (relative to site root)
     const POKEMON_PATH = 'pokemon';
@@ -973,7 +1009,10 @@
 
     function fitHeaderText(span, max=18, min=9){
       const isRow = span.classList.contains('rowhdrText');
-      const maxLines = isRow ? MAX_ROW_HEADER_LINES : MAX_COL_HEADER_LINES;
+      const mobile = window.matchMedia('(max-width:800px)').matches;
+      const maxLines = isRow
+        ? (mobile ? MAX_ROW_HEADER_LINES_MOBILE : MAX_ROW_HEADER_LINES_DESKTOP)
+        : (mobile ? MAX_COL_HEADER_LINES_MOBILE : MAX_COL_HEADER_LINES_DESKTOP);
       for (let s=max; s>=min; s--){
         span.style.fontSize = s + 'px';
         const lines = linesIfRendered(span, s);
@@ -1046,6 +1085,64 @@
         const sp = box.querySelector('.hdrText, .rowhdrText');
         if (sp) startEditHeader(sp);
       });
+    });
+
+    // ========= Header Tooltips =========
+    const hdrTooltip = document.getElementById('hdrTooltip');
+    let tooltipTimer = null;
+
+    function showTooltip(box, span){
+      const text = span.textContent.trim();
+      if (!text) return;
+      hdrTooltip.textContent = text;
+
+      const rect = box.getBoundingClientRect();
+      const isCol = box.classList.contains('hdr');
+
+      if (isCol){
+        // Position below column header
+        hdrTooltip.style.left = Math.max(4, rect.left + rect.width/2 - 110) + 'px';
+        hdrTooltip.style.top = (rect.bottom + 6) + 'px';
+      } else {
+        // Position to the right of row header
+        hdrTooltip.style.left = (rect.right + 6) + 'px';
+        hdrTooltip.style.top = (rect.top + rect.height/2 - 16) + 'px';
+      }
+
+      hdrTooltip.classList.add('visible');
+    }
+
+    function hideTooltip(){
+      hdrTooltip.classList.remove('visible');
+      clearTimeout(tooltipTimer);
+    }
+
+    document.querySelectorAll('.hdr, .rowhdr').forEach(box => {
+      const sp = box.querySelector('.hdrText, .rowhdrText');
+      if (!sp) return;
+
+      // Desktop: hover
+      box.addEventListener('mouseenter', () => {
+        tooltipTimer = setTimeout(() => showTooltip(box, sp), 300);
+      });
+      box.addEventListener('mouseleave', hideTooltip);
+
+      // Mobile: touch
+      box.addEventListener('touchstart', (e) => {
+        // Don't show tooltip if editing
+        if (sp.isContentEditable) return;
+        e.preventDefault();
+        showTooltip(box, sp);
+      }, { passive: false });
+
+      box.addEventListener('touchend', () => {
+        tooltipTimer = setTimeout(hideTooltip, 1500);
+      });
+    });
+
+    // Hide tooltip when tapping elsewhere
+    document.addEventListener('touchstart', (e) => {
+      if (!e.target.closest('.hdr, .rowhdr')) hideTooltip();
     });
 
     // ========= Cells =========
