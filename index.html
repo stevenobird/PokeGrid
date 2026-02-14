@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PokéGrid 5×5</title>
 
+  <!-- Preload critical data files -->
+  <link rel="preload" href="data/dex_de.json" as="fetch" crossorigin />
+  <link rel="preload" href="data/grid_preset.json" as="fetch" crossorigin />
+
+  <!-- Preload shiny effect assets -->
+  <link rel="preload" href="assets/effects/ShinySparkle.gif" as="image" />
+  <link rel="preload" href="assets/effects/ShinySound.mp3" as="audio" />
+
   <style>
     :root{
       --stageH: min(920px, calc(100vh - 44px));
@@ -728,6 +736,7 @@
 
           const img = document.createElement('img');
           img.alt = pokeKey;
+          img.loading = 'lazy';
           img.src = getImageUrl(pid, false); // restore always uses normal sprite
           cells[i].appendChild(img);
           restored++;
@@ -1218,6 +1227,7 @@
 
       const img = document.createElement('img');
       img.alt = entry.display;
+      img.loading = 'lazy';
       img.src = url;
       selectedCell.appendChild(img);
 
