@@ -1477,6 +1477,11 @@
       if (e.key.toLowerCase() === 'r') randomEmptyCell();
       if (e.key.toLowerCase() === 'd') setDeleteMode(!deleteMode);
       if (e.key.toLowerCase() === 'h') togglePresenter();
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedCell && selectedCell.dataset.pid){
+        e.preventDefault();
+        clearCell(selectedCell);
+        toast('Zelle geleert.');
+      }
     });
 
     // ========= Init =========
