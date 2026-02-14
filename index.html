@@ -326,16 +326,15 @@
       min-width:24px;
     }
 
-    /* Pretty hover popup (multiline) */
-    .commTip{
-      position:absolute;
-      top: calc(100% + 8px);
-      right: 0;
+    /* Community tooltip (rendered as fixed overlay to avoid cell overflow clip) */
+    #commTooltip{
+      position:fixed;
+      z-index:800;
       width: max-content;
       max-width: 220px;
       padding:10px 10px;
       border-radius:14px;
-      background: rgba(12,14,22,.92);
+      background: rgba(12,14,22,.94);
       border: 1px solid rgba(255,255,255,.18);
       box-shadow: 0 18px 40px rgba(0,0,0,.55);
       backdrop-filter: blur(8px);
@@ -343,24 +342,13 @@
       font-size:12px;
       line-height:1.25;
       letter-spacing:.2px;
-      display:none;
-      pointer-events:none; /* damit es beim Hover nicht flackert */
+      pointer-events:none;
+      opacity:0;
+      transition: opacity .15s ease;
     }
+    #commTooltip.visible{ opacity:1; }
 
-    .commTip:before{
-      content:"";
-      position:absolute;
-      top:-6px;
-      right:14px;
-      width:10px;
-      height:10px;
-      background: rgba(12,14,22,.92);
-      border-left: 1px solid rgba(255,255,255,.18);
-      border-top: 1px solid rgba(255,255,255,.18);
-      transform: rotate(45deg);
-    }
-
-    .commTip .tTitle{
+    #commTooltip .tTitle{
       font-weight:900;
       text-transform:uppercase;
       letter-spacing:1.1px;
@@ -369,15 +357,14 @@
       margin-bottom:6px;
     }
 
-    .commTip .tList{
-      white-space:pre-line; /* <-- newline support */
+    #commTooltip .tList{
+      white-space:pre-line;
       word-break: break-word;
       overflow-wrap: anywhere;
     }
 
-    .commBadgeWrap:hover .commTip{
-      display:block;
-    }
+    /* Hide the inline .commTip (kept in DOM for data, but never shown) */
+    .commTip{ display:none !important; }
 
     .cell img{
       width: 98%;
@@ -740,6 +727,7 @@
   </div>
 
   <div id="hdrTooltip"></div>
+  <div id="commTooltip"><div class="tTitle"></div><div class="tList"></div></div>
   <div id="bgLayer"></div>
 
   <div class="wrap">
@@ -1382,48 +1370,28 @@
         return;
       }
 
-      const tipTitle = `Wer hatte das hier?`;
       const list = namesMultiline || '';
 
       if (existingWrap){
         const badge = existingWrap.querySelector('.commBadge');
-        const tip = existingWrap.querySelector('.commTip');
-        const listEl = existingWrap.querySelector('.tList');
-
         if (badge) badge.textContent = String(count);
-        if (tip){
-          const titleEl = tip.querySelector('.tTitle');
-          if (titleEl) titleEl.textContent = tipTitle;
-        }
-        if (listEl) listEl.textContent = list || '—';
+        existingWrap.dataset.names = list;
         return;
       }
 
       const wrap = document.createElement('div');
       wrap.className = 'commBadgeWrap';
+      wrap.dataset.names = list;
 
       const badge = document.createElement('div');
       badge.className = 'commBadge';
       badge.textContent = String(count);
 
-      const tip = document.createElement('div');
-      tip.className = 'commTip';
-
-      const tTitle = document.createElement('div');
-      tTitle.className = 'tTitle';
-      tTitle.textContent = tipTitle;
-
-      const tList = document.createElement('div');
-      tList.className = 'tList';
-      tList.textContent = list || '—';
-
-      tip.appendChild(tTitle);
-      tip.appendChild(tList);
-
       wrap.appendChild(badge);
-      wrap.appendChild(tip);
-
       cell.appendChild(wrap);
+
+      // Attach tooltip events
+      attachBadgeTooltipEvents(wrap);
     }
 
     function updateCommunityOverlayForCell(cell){
@@ -1483,6 +1451,69 @@
       }
       if (scoreEl) scoreEl.textContent = String(score);
     }
+
+    // ========= Community Badge Tooltip =========
+    const commTooltip = document.getElementById('commTooltip');
+    const commTipTitle = commTooltip.querySelector('.tTitle');
+    const commTipList = commTooltip.querySelector('.tList');
+    let commTipTimer = null;
+
+    function showCommTooltip(wrap){
+      const names = wrap.dataset.names || '';
+      commTipTitle.textContent = 'Wer hatte das hier?';
+      commTipList.textContent = names || '\u2014';
+
+      const rect = wrap.getBoundingClientRect();
+
+      // Position: try below the badge first, adjust if off-screen
+      let top = rect.bottom + 8;
+      let left = rect.left + rect.width / 2 - 110;
+
+      // Clamp horizontal
+      left = Math.max(6, Math.min(left, window.innerWidth - 226));
+
+      // If below would go off-screen, show above
+      commTooltip.style.left = left + 'px';
+      commTooltip.style.top = top + 'px';
+      commTooltip.classList.add('visible');
+
+      // Check if it overflows bottom and flip above
+      requestAnimationFrame(() => {
+        const tipRect = commTooltip.getBoundingClientRect();
+        if (tipRect.bottom > window.innerHeight - 6){
+          commTooltip.style.top = (rect.top - tipRect.height - 8) + 'px';
+        }
+      });
+    }
+
+    function hideCommTooltip(){
+      commTooltip.classList.remove('visible');
+      clearTimeout(commTipTimer);
+    }
+
+    function attachBadgeTooltipEvents(wrap){
+      // Desktop hover
+      wrap.addEventListener('mouseenter', () => {
+        commTipTimer = setTimeout(() => showCommTooltip(wrap), 200);
+      });
+      wrap.addEventListener('mouseleave', hideCommTooltip);
+
+      // Mobile touch
+      wrap.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+        showCommTooltip(wrap);
+      }, { passive: true });
+      wrap.addEventListener('touchend', () => {
+        commTipTimer = setTimeout(hideCommTooltip, 2000);
+      });
+    }
+
+    // Dismiss on tap elsewhere (mobile)
+    document.addEventListener('touchstart', (e) => {
+      if (!e.target.closest('.commBadgeWrap')) hideCommTooltip();
+    });
+    // Dismiss on scroll
+    document.addEventListener('scroll', hideCommTooltip, true);
 
     // ========= Place Pokemon =========
     function placePokemon(entry){
