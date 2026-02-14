@@ -209,10 +209,19 @@
 
       display:-webkit-box;
       -webkit-box-orient: vertical;
-      -webkit-line-clamp: 3;
 
       word-break: break-word;
       overflow-wrap: anywhere;
+    }
+
+    /* Column headers: limited height, clamp to 3 lines */
+    .hdrText{
+      -webkit-line-clamp: 3;
+    }
+
+    /* Row headers: more vertical space, allow up to 6 lines */
+    .rowhdrText{
+      -webkit-line-clamp: 6;
     }
 
     .hdrText[contenteditable="true"],
@@ -557,7 +566,6 @@
       .hdrText, .rowhdrText{
         font-size: clamp(8px, 2.4vw, 14px);
         letter-spacing: .3px;
-        -webkit-line-clamp: 3;
       }
 
       .cornerInfo{ padding: 4px 6px; border-radius: 10px; }
@@ -752,7 +760,8 @@
 
   <script>
     // ========= CONFIG =========
-    const MAX_HEADER_LINES = 3;
+    const MAX_COL_HEADER_LINES = 3;
+    const MAX_ROW_HEADER_LINES = 6;
 
     // Asset paths (relative to site root)
     const POKEMON_PATH = 'pokemon';
@@ -963,10 +972,12 @@
     }
 
     function fitHeaderText(span, max=18, min=9){
+      const isRow = span.classList.contains('rowhdrText');
+      const maxLines = isRow ? MAX_ROW_HEADER_LINES : MAX_COL_HEADER_LINES;
       for (let s=max; s>=min; s--){
         span.style.fontSize = s + 'px';
         const lines = linesIfRendered(span, s);
-        if (lines <= MAX_HEADER_LINES) break;
+        if (lines <= maxLines) break;
       }
     }
 
