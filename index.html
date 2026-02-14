@@ -1757,8 +1757,15 @@
     function openPanel(){
       panelEl.classList.add('open');
       panelBackdrop.classList.add('open');
-      // Auto-focus the input so the user can start typing immediately
-      setTimeout(() => input.focus(), 100);
+      // Focus input after the slide-up animation so the keyboard opens
+      setTimeout(() => {
+        input.focus({ preventScroll: true });
+        // iOS sometimes needs a second nudge
+        if (document.activeElement !== input){
+          input.click();
+          input.focus({ preventScroll: true });
+        }
+      }, 260);
     }
     function closePanel(){
       panelEl.classList.remove('open');
